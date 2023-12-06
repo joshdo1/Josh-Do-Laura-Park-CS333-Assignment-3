@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NBA Player Statistics Visualization</title>
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+    <style>
+        /* Add your CSS styling here */
+        .tooltip {
+            position: absolute;
+            text-align: center;
+            padding: 8px;
+            font-size: 12px;
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            pointer-events: none;
+            opacity: 0;
+        }
+
+        .scatter-plot {
+            width: 300px;
+            height: 220px;
+            margin: 35px;
+            display: inline-block;
+        }
+
+        .scatter-axis text {
+            font-size: 10px;
+        }
+
+        .histogram {
+            position: relative;
+            width: 480px;
+            height: 250px;
+            margin: 20px auto;
+        }
+
+        .histogram-bar {
+            fill: steelblue;
+            cursor: pointer;
+        }
+
+        #teamDropdown {
+            width: 200px;
+            margin: 10px auto;
+        }
+
+        #backButton {
+            position: absolute;
+            top: 0;
+            left: 0;
+            margin: 10px;
+            padding: 8px;
+            font-size: 12px;
+            cursor: pointer;
+            background-color: #f0f0f0;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+
+<body>
+
+<h1 style="text-align: center;">NBA Player Statistics for the 2021 - 2022 Regular Season</h1>
+
+<div id="teamDropdown">
+    <label for="teamSelect">Select Team:</label>
+    <select id="teamSelect"></select>
+</div>
+
+<div class="histogram" id="histogram-container"></div>
+<div id="scatter-container"></div>
+
+<button id="backButton" onclick="goBack()">Back to All Ages</button>
+
+<script>
+    // Set up the scatter plot SVGs
+    const scatterWidth = 350;
+    const scatterHeight = 350;
+
+    const scatterPlots = [
+        { x: "3PA", y: "3P", title: "3 Points Attempted vs. 3 Points Made" },
+        { x: "2PA", y: "2P", title: "2 Points Attempted vs. 2 Points Made" },
+        { x: "FGA", y: "FG", title: "Field Goals Attempted vs. Field Goals Made" },
+        { x: "FTA", y: "FT", title: "Free Throws Attempted vs. Free Throws Made" }
+    ];
+
+    let data; // Declare data variable outside the d3.csv callback
+
+    const teamDropdown = d3.select("#teamSelect");
+
+    // Load data from CSV
+    d3.csv("nba3.csv").then(csvData => {
+        data = csvData; // Assign the loaded data to the variable
+
+        // Extract unique teams from the data, excluding "TOT"
+        const uniqueTeams = Array.from(new Set(data.map(d => d.Tm)))
+            .filter(team => team !== "TOT")
+            .sort((a, b) => d3.ascending(getTeamFullName(a), getTeamFullName(b)));
+
+        // Add "All Teams" option
+        uniqueTeams.unshift("All Teams");
+
+        // Populate the dropdown with unique teams
+        teamDropdown.selectAll("option")
+            .data(uniqueTeams)
+            .enter()
+            .append("option")
+            .text(d => getTeamFullName(d))
+            .attr("value", d => d);
+
+        // Initial team selection
+        const selectedTeam = "All Teams";
+
+        // Update visualizations based on team selection
+        updateVisualizations(selectedTeam);
+    });
+
+    // Event listener for team selection change
+    teamDropdown.on("change", function () {
+        const selectedTeam = d3.select(this).property("value");
+        // Update visualizations based on team selection
+        updateVisualizations(selectedTeam);
+    });
+
+    // Function to update visualizations based on selected team and age range
+    function updateVisualizations(selectedTeam, selectedAgeRange) {
+        let filteredData;
+
+        // Filter data based on selected team
+        if (selectedTeam === "All Teams") {
+            // Use all data for "All Teams" option
+            filteredData = data;
+        } else {
+            filteredData = data.filter(d => d.Tm === selectedTeam);
+        }
+
+        // Filter data based on selected age range
+        if (selectedAgeRange) {
+            const [minAge, maxAge] = selectedAgeRange.split("-");
+            filteredData = filteredData.filter(d => d.Age >= +minAge && d.Age <= +maxAge);
+        }
+
+        // Clear existing visualizations
+        d3.select("#scatter-container").selectAll("*").remove();
+        d3.select("#histogram-container").selectAll("*").remove();
+
+        // Set up the scatter plot SVGs
+        scatterPlots.forEach(plot => {
+            const scatterSVG = d3.select("#scatter-container")
+                .append("div")
+                .attr("class", "scatter-plot")
+                .append("svg")
+                .attr("width", scatterWidth)
+                .attr("height", scatterHeight)
+                .append("g")
+                .attr("transform", "translate(40,20)");
+
+            scatterSVG.append("text")
+                .attr("x", scatterWidth / 2)
+                .attr("y", -10)
+                .attr("text-anchor", "middle")
+                .style("font-size", "12px")
+                .text(plot.title);
+
+            // Convert numeric strings to numbers
+            filteredData.forEach(d => {
+                d.Age = +d.Age;
+                d[plot.x] = +d[plot.x];
+                d[plot.y] = +d[plot.y];
+            });
+
+            // Create x and y scales for the scatter plot with fixed maximum values
+            const xScatter = d3.scaleLinear()
+                .domain([0, 25])
+                .range([0, scatterWidth - 60]); // Adjusted to prevent cutting off the ends
+
+            const yScatter = d3.scaleLinear()
+                .domain([0, 15])
+                .range([scatterHeight - 40, 0]);
+
+
+            // Create x and y axes for the scatter plot
+            const xAxis = d3.axisBottom(xScatter).ticks(5);
+            const yAxis = d3.axisLeft(yScatter).ticks(5);
+
+            scatterSVG.append("g")
+                .attr("class", "scatter-axis")
+                .attr("transform", "translate(0," + (scatterHeight - 40) + ")")
+                .call(xAxis)
+                .append("text")
+                .attr("x", scatterWidth / 2 - 20)
+                .attr("y", 30)
+                .attr("text-anchor", "middle")
+                .text(plot.x);
+
+            scatterSVG.append("g")
+                .attr("class", "scatter-axis")
+                .call(yAxis)
+                .append("text")
+                .attr("transform", "rotate(-90)")
+                .attr("y", -30)
+                .attr("x", -scatterHeight / 2)
+                .attr("dy", "0.71em")
+                .attr("text-anchor", "middle")
+                .text(plot.y);
+
+            // Create circles for the scatter plot
+            scatterSVG.selectAll("circle")
+                .data(filteredData)
+                .enter()
+                .append("circle")
+                .attr("cx", d => xScatter(d[plot.x]))
+                .attr("cy", d => yScatter(d[plot.y]))
+                .attr("r", 3)
+                .attr("fill", "steelblue")
+                .attr("fill-opacity", 0.4) // Set the fill opacity
+                .on("mouseover", d => handleMouseOverScatter(d, plot))
+                .on("mouseout", handleMouseOutScatter);
+        });
+
+        // Set up the histogram SVG
+        const histogramWidth = 700;
+        const histogramHeight = 250;
+
+        const histogramSVG = d3.select("#histogram-container")
+            .append("svg")
+            .attr("width", histogramWidth)
+            .attr("height", histogramHeight)
+            .append("g")
+            .attr("transform", "translate(40,20)");
+
+        // Create bins for the histogram
+        const ageExtent = d3.extent(filteredData, d => d.Age);
+        const binWidth = 2;
+        const bins = d3.range(ageExtent[0], 45 + binWidth, binWidth); // Fixed maximum value
+
+        // Create a histogram function
+        const histogram = d3.histogram()
+            .value(d => d.Age)
+            .domain(ageExtent)
+            .thresholds(bins);
+
+        // Calculate the histogram data
+        const histogramData = histogram(filteredData);
+
+        // Create x and y scales for the histogram
+        const xHistogram = d3.scaleLinear()
+            .domain([ageExtent[0], 45]) // Fixed maximum value
+            .range([0, histogramWidth]);
+
+        const yHistogram = d3.scaleLinear()
+            .domain([0, d3.max(histogramData, d => d.length)])
+            .range([histogramHeight - 40, 0]);
+
+        // Create x axis for the histogram
+        const xAxisHistogram = d3.axisBottom(xHistogram);
+        // Create y axis for the histogram without ticks and values
+        const yAxisHistogram = d3.axisLeft(yHistogram).ticks(0);
+
+        histogramSVG.append("g")
+            .attr("class", "histogram-axis")
+            .attr("transform", "translate(0," + (histogramHeight - 40) + ")")
+            .call(xAxisHistogram);
+
+        histogramSVG.append("g")
+            .attr("class", "histogram-axis")
+            .call(yAxisHistogram);
+
+        // Create bars for the histogram
+        histogramSVG.selectAll(".histogram-bar").remove(); // Remove existing bars
+        histogramSVG.selectAll(".histogram-bar")
+            .data(histogramData)
+            .enter()
+            .append("rect")
+            .attr("class", "histogram-bar")
+            .attr("x", d => xHistogram(d.x0) + 1)
+            .attr("y", d => yHistogram(d.length))
+            .attr("width", d => xHistogram(d.x1) - xHistogram(d.x0) - 1)
+            .attr("height", d => histogramHeight - 40 - yHistogram(d.length))
+            .on("mouseover", handleMouseOverHistogram)
+            .on("mouseout", handleMouseOutHistogram)
+            .on("click", d => handleHistogramBarClick(d, selectedTeam)); // Pass selectedTeam to the click event
+    }
+
+    // Function to handle click event for histogram bars
+    function handleHistogramBarClick(ageRange, selectedTeam) {
+        // Extract min and max age from the clicked bar
+        const minAge = ageRange.x0;
+        const maxAge = ageRange.x1;
+        const selectedAgeRange = `${minAge}-${maxAge}`;
+
+        // Update visualizations based on selected team and age range
+        updateVisualizations(selectedTeam, selectedAgeRange);
+    }
+
+    // Function to handle back button click event
+    function goBack() {
+        // Reset age range selection to show all ages
+        updateVisualizations(d3.select("#teamSelect").property("value"));
+    }
+
+    // Tooltip for the scatter plot
+    const tooltipScatter = d3.select("body").append("div")
+        .attr("class", "tooltip")
+        .style("opacity", 0);
+
+    // Function to handle mouseover event for the scatter plot
+    function handleMouseOverScatter(d, plot) {
+        let tooltipText = `
+            Player: ${d.Player}<br>
+            ${plot.x}: ${d[plot.x]}<br>
+            ${plot.y}: ${d[plot.y]}
+        `;
+
+        // Conditionally add percentage information based on the scatter plot
+        if (plot.title === "3 Points Attempted vs. 3 Points Made") {
+            tooltipText += `<br>3P%: ${d["3P%"]}`;
+        } else if (plot.title === "2 Points Attempted vs. 2 Points Made") {
+            tooltipText += `<br>2P%: ${d["2P%"]}`;
+        } else if (plot.title === "Field Goals Attempted vs. Field Goals Made") {
+            tooltipText += `<br>FG%: ${d["FG%"]}`;
+        } else if (plot.title === "Free Throws Attempted vs. Free Throws Made") {
+            tooltipText += `<br>FT%: ${d["FT%"]}`;
+        }
+
+        tooltipScatter.transition()
+            .duration(200)
+            .style("opacity", 0.9);
+
+        tooltipScatter.html(tooltipText)
+            .style("left", (d3.event.pageX) + "px")
+            .style("top", (d3.event.pageY - 28) + "px");
+    }
+
+    // Function to handle mouseout event for the scatter plot
+    function handleMouseOutScatter() {
+        tooltipScatter.transition()
+            .duration(500)
+            .style("opacity", 0);
+    }
+
+    // Tooltip for the histogram
+    const tooltipHistogram = d3.select("body").append("div")
+        .attr("class", "tooltip")
+        .style("opacity", 0);
+
+    // Function to handle mouseover event for the histogram
+    function handleMouseOverHistogram(d) {
+        const ageRange = `${d.x0}-${d.x1}`;
+        const playersCount = d.length;
+
+        const tooltipText = `Age Range: ${ageRange}<br>Players Count: ${playersCount}`;
+
+        tooltipHistogram.transition()
+            .duration(200)
+            .style("opacity", 0.9);
+
+        tooltipHistogram.html(tooltipText)
+            .style("left", (d3.event.pageX) + "px")
+            .style("top", (d3.event.pageY - 28) + "px");
+    }
+
+    // Function to handle mouseout event for the histogram
+    function handleMouseOutHistogram() {
+        tooltipHistogram.transition()
+            .duration(500)
+            .style("opacity", 0);
+    }
+
+    // Function to get full team name based on abbreviation
+    function getTeamFullName(abbreviation) {
+        const teamMap = {
+            ATL: "Atlanta Hawks",
+            BOS: "Boston Celtics",
+            CHO: "Charlotte Hornets",
+            CHI: "Chicago Bulls",
+            CLE: "Cleveland Cavaliers",
+            DAL: "Dallas Mavericks",
+            DEN: "Denver Nuggets",
+            DET: "Detroit Pistons",
+            GSW: "Golden State Warriors",
+            HOU: "Houston Rockets",
+            IND: "Indiana Pacers",
+            LAC: "Los Angeles Clippers",
+            LAL: "Los Angeles Lakers",
+            MEM: "Memphis Grizzlies",
+            MIA: "Miami Heat",
+            MIL: "Milwaukee Bucks",
+            MIN: "Minnesota Timberwolves",
+            NOP: "New Orleans Pelicans",
+            NYK: "New York Knicks",
+            BRK: "Brooklyn Nets",
+            OKC: "Oklahoma City Thunder",
+            ORL: "Orlando Magic",
+            PHI: "Philadelphia 76ers",
+            PHO: "Phoenix Suns",
+            POR: "Portland Trailblazers",
+            SAC: "Sacramento Kings",
+            SAS: "San Antonio Spurs",
+            TOR: "Toronto Raptors",
+            UTA: "Utah Jazz",
+            WAS: "Washington Wizards"
+        };
+
+        return teamMap[abbreviation] || abbreviation;
+    }
+</script>
+
+</body>
+
+</html>
